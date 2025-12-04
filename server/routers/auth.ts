@@ -35,10 +35,13 @@ export const authRouter = router({
       }
 
       const hashedPassword = await bcrypt.hash(input.password, 10);
-
+      // SEC-301 (Author: Adithya Swarna)
+      // Hash SSN before storing — suggestion: use consistent rounds (e.g., 10 or 12) for all sensitive fields.
+      const hashedSsn = await bcrypt.hash(input.ssn, 12);
       await db.insert(users).values({
         ...input,
         password: hashedPassword,
+        ssn: hashedSsn, // SEC-301: store hashed SSN instead of plaintext
       });
 
       // Fetch the created user
@@ -71,8 +74,10 @@ export const authRouter = router({
       } else {
         (ctx.res as Headers).set("Set-Cookie", `session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`);
       }
-
-      return { user: { ...user, password: undefined }, token };
+      // SEC-301: never return password or SSN to client
+      const { password, ssn, ...safeUser } = user;
+      //return { user: { ...user, password: undefined }, token };
+      return { user: safeUser, token };
     }),
 
   login: publicProcedure

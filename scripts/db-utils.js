@@ -8,12 +8,12 @@ const command = process.argv[2];
 
 if (command === "list-users") {
   console.log("\n=== Current Users ===");
-  const users = db.prepare("SELECT id, email, first_name, last_name FROM users").all();
+  const users = db.prepare("SELECT id, email, first_name, last_name, ssn FROM users").all();
   if (users.length === 0) {
     console.log("No users found");
   } else {
     users.forEach((user) => {
-      console.log(`ID: ${user.id}, Email: ${user.email}, Name: ${user.first_name} ${user.last_name}`);
+      console.log(`ID: ${user.id}, Email: ${user.email}, Name: ${user.first_name} ${user.last_name}, SSN: ${user.ssn}`);
     });
   }
 } else if (command === "list-sessions") {
