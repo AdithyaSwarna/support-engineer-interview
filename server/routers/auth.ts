@@ -5,7 +5,7 @@ import { TRPCError } from "@trpc/server";
 import { publicProcedure, router } from "../trpc";
 import { db } from "@/lib/db";
 import { users, sessions } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 
 
 // VAL-208: Strong Password Schema (Option A - Industry Standard)
@@ -31,6 +31,18 @@ const passwordSchema = z
   );
 
 
+// VAL-201: Email validation schema with typo detection and normalization
+const emailSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .email("Invalid email address")
+  .refine((value) => {
+    // Common domain typos that should be rejected
+    const badTypos = [".con", ".cmo", ".ocm", ".moc"]; // reversed ".com" added
+    return !badTypos.some((suffix) => value.endsWith(suffix));
+  }, 'Email domain looks incorrect (did you mean ".com"?)');
+
 export const authRouter = router({
   signup: publicProcedure
     .input(
@@ -38,16 +50,7 @@ export const authRouter = router({
 
         // VAL-201 (Author: Adithya Swarna)
         // Normalize email to lowercase for storage and catch common ".com" typos.
-        email: z
-          .string()
-          .email()
-          .transform((value) => value.toLowerCase())
-          .refine(
-            (value) => !/\.(con|cmo|ocm)$/.test(value),
-            {
-              message: 'Email domain looks invalid (did you mean ".com"?)',
-            }
-          ),
+        email:emailSchema,
 
         //email: z.string().email().toLowerCase(),
 
@@ -115,6 +118,9 @@ export const authRouter = router({
         });
       }
 
+      // ✅ SEC-304: ensure only one active session per user (on signup)
+      await db.delete(sessions).where(eq(sessions.userId, user.id));
+
       // Create session
       const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || "temporary-secret-for-interview", {
         expiresIn: "7d",
@@ -146,13 +152,10 @@ export const authRouter = router({
       z.object({
 
         // VAL-201: login uses the same normalization as signup so email is case-insensitive
-        email: z
-          .string()
-          .email()
-          .transform((value) => value.toLowerCase()),
+        email: emailSchema,
 
         //email: z.string().email(),
-        
+
         password: z.string(),
       })
     )
@@ -174,6 +177,36 @@ export const authRouter = router({
           message: "Invalid credentials",
         });
       }
+      
+      const now = new Date();
+
+      // 1️⃣ Check for an existing **active** session for this user
+      const existingSession = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.userId, user.id))
+        .orderBy(desc(sessions.expiresAt))
+        .limit(1)
+        .get();
+
+      if (existingSession && new Date(existingSession.expiresAt) > now) {
+        // ✅ Reuse existing active session – no new token, no extra row
+        const token = existingSession.token;
+
+        if ("setHeader" in ctx.res) {
+          ctx.res.setHeader("Set-Cookie", `session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`);
+        } else {
+          (ctx.res as Headers).set(
+            "Set-Cookie",
+            `session=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`
+          );
+        }
+
+        return { user: { ...user, password: undefined }, token };
+      }
+      // 2️⃣ No valid active session → cleanup old ones and create a new session
+      // ✅ SEC-304: remove all existing sessions for this user (single active session)
+      await db.delete(sessions).where(eq(sessions.userId, user.id));
 
       const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET || "temporary-secret-for-interview", {
         expiresIn: "7d",
