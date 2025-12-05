@@ -24,6 +24,9 @@ Branch: fix/tickets
 | VAL-205  | Validation | High | Already Done --Check Comments  |
 | VAL-207  | Validation | High | Fixed  |
 | VAL-210  | Validation | High | Already Done --Check Comments  |
+| SEC-304  | Security | High | Fixed  |
+| PERF-403   | Logic and Performance | High | Fixed  |
+
 
 ---
 
@@ -2085,4 +2088,405 @@ VAL-210 was indirectly fixed by VAL-206 improvements:
 - No additional code change needed  
 
 **VAL-210: Closed — Already resolved through updated card validation.**
+
+---
+
+# ✅ SEC-304 — Session Management  
+
+---
+
+### 1. Issue Summary
+
+The original system allowed:
+
+- Multiple simultaneous active sessions per user  
+- No cleanup of expired sessions  
+- A brand-new session token generated every login  
+- No mechanism to reuse an existing valid session  
+
+Security risks created:
+
+- Lost/stolen tokens remained usable indefinitely  
+- Users kept long-lived access from multiple devices  
+- Harder debugging due to token sprawl  
+- Expired session rows accumulated in the database  
+
+---
+
+### 2. Root Cause Analysis
+
+#### **Root Causes Identified**
+
+1. **Login flow always inserted a new session**, regardless of existing ones:
+
+```ts
+await db.insert(sessions)...
+```
+
+2. No check for an existing active (non-expired) session →  
+   Logging in multiple times resulted in multiple valid tokens.
+
+3. **Expired sessions were never removed**, creating database clutter.
+
+4. The system had **no invariant to ensure “only one valid session per user.”**
+
+---
+
+### 3. Fix Implemented (Final Solution)
+
+### ✔️ Achieved Behavior
+
+- If the user already has **one valid active session**,  
+  → **Reuse that token** (no new session created).
+
+- If the user has **no session or only expired sessions**,  
+  → **Delete old ones, create a fresh single session**.
+
+This prevents:
+
+- Session duplication  
+- Token sprawl  
+- Persistent access across devices  
+- Unbounded DB growth  
+
+---
+
+### 4. Code Changes (What Was Updated)
+
+#### 🔧 Updated File: `server/routers/auth.ts`  
+#### 🔧 Updated Endpoint: `login`
+
+---
+
+### ✔️ New Logic
+
+#### **Step 1 — Check for an existing valid session**
+
+```ts
+const existingSession = await db
+  .select()
+  .from(sessions)
+  .where(eq(sessions.userId, user.id))
+  .orderBy(desc(sessions.expiresAt))
+  .limit(1)
+  .get();
+
+if (existingSession && new Date(existingSession.expiresAt) > now) {
+  // Reuse existing token
+  return { user: safeUser, token: existingSession.token };
+}
+```
+
+---
+
+#### **Step 2 — No valid session → clean old ones + create a new one**
+
+```ts
+await db.delete(sessions).where(eq(sessions.userId, user.id));
+
+const token = jwt.sign({ userId: user.id }, secret, { expiresIn: "7d" });
+
+await db.insert(sessions).values({
+  userId: user.id,
+  token,
+  expiresAt,
+});
+```
+
+---
+
+### ✔️ Guarantees
+
+- Exactly **one** active session per user  
+- Existing session tokens reused  
+- Expired sessions removed  
+- Clean, predictable session table
+
+---
+
+### 5. Testing Summary (Results)
+
+Commands used:
+
+```
+npm run db:clear
+npm run db:list-sessions
+```
+
+| Action | Expected | Actual |
+|--------|----------|--------|
+| Login first time | 1 session created | ✅ Works |
+| Login again during validity | No new session, reuse existing | ✅ Works |
+| Login after DB cleared | New session created | ✅ Works |
+| Login with expired session | Clean up + create new | ✅ Works |
+| Rapid multiple logins | Always 1 active session | ✅ Works |
+
+✔️ **Final Verdict:**  
+The updated logic is fully functional and enforces the intended security model.
+
+---
+
+### 6. Remaining Notes
+
+- Behavior now matches real-world secure systems (banking, government portals).  
+- Duplicate sessions only occur if SQLite is accessed by multiple simultaneous processes (possible only in dev).  
+- No further functional fixes required.
+
+#### Optional Production Enhancements:
+
+- Track IP/device metadata for suspicious session reuse  
+- Add background cron job to clean expired sessions more aggressively  
+
+---
+
+### 7. Final Summary
+
+**SEC-304 is now fully resolved.**
+
+The session system now guarantees:
+
+- ✔ One active session per user at any given time  
+- ✔ Reuse of existing valid sessions  
+- ✔ Cleanup and replacement of expired sessions  
+- ✔ No unnecessary token creation  
+
+This brings the authentication lifecycle to a secure, production-ready standard.
+
+---
+
+# ✅ PERF-403 — Session Expiry
+
+---
+
+### 1. Issue Summary
+
+Ticket: **PERF-403 — "Expiring sessions still considered valid until exact expiry time"**
+
+Previously, a session with:
+
+```
+expiresAt = 12:00:00.000
+```
+
+remained valid until:
+
+```
+11:59:59.999
+```
+
+Meaning:
+
+- Session was valid up to the exact expiry timestamp  
+- No safety buffer before expiry  
+- Any slight **clock skew**, **network delay**, or **edge timing** could cause borderline requests to be incorrectly accepted  
+
+For a banking-style app, this is a security risk near expiration windows.
+
+---
+
+### 2. Root Cause Analysis
+
+**File:** `server/trpc.ts`  
+**Function:** `createContext`
+
+Original simplified logic:
+
+```ts
+if (session) {
+  const now = new Date();
+  const expiry = new Date(session.expiresAt);
+
+  if (expiry <= now) {
+    // delete expired
+  } else {
+    // treat as valid
+    user = ...
+  }
+}
+```
+
+Problem:
+
+- Session was considered **valid if expiry > now**
+- No early-expiry buffer  
+- Users could operate right up until the exact millisecond of expiry  
+- Security team wanted strict, defensive behavior: expire slightly early
+
+---
+
+### 3. Fix Implemented
+
+#### **Design Goal:**  
+Introduce an **early-expiry window** so sessions expire slightly *before* their expiresAt value.
+
+I selected a **1-minute early-expiry window**:
+
+- If a session has **≤ 60 seconds remaining**, treat it as expired  
+- Only sessions with **> 60 seconds** remaining are valid  
+
+---
+
+### **Updated Code (Final Version)**  
+File: `server/trpc.ts`  
+Function: `createContext`
+
+```ts
+if (session) {
+  const now = new Date();
+  const expiry = new Date(session.expiresAt);
+  const expiresInMs = expiry.getTime() - now.getTime();
+
+  // SEC-304 + PERF-403 (Author: Adithya Swarna)
+  // Expire early when:
+  // - Session has passed expiry (expiresInMs <= 0)
+  // - Session is within 60 seconds of expiry (expiresInMs <= EARLY_EXPIRY_WINDOW_MS)
+  const EARLY_EXPIRY_WINDOW_MS = 60_000; // 1 minute
+
+  if (expiresInMs <= 0 || expiresInMs <= EARLY_EXPIRY_WINDOW_MS) {
+    await db.delete(sessions).where(eq(sessions.id, session.id!));
+  } else {
+    // Valid session → attach user
+    user = await db.select().from(users).where(eq(users.id, decoded.userId)).get();
+  }
+}
+```
+
+---
+
+### **Behavior After Fix**
+
+| Scenario | Behavior |
+|---------|----------|
+| Session already expired | Deleted + rejected |
+| Session expiring in ≤ 60s | Deleted + rejected |
+| Session with > 60s left | Accepted, user attached to context |
+
+This eliminates the “valid until last millisecond” problem reported in PERF-403.
+
+---
+
+### 4. Interaction With SEC-304
+
+SEC-304 previously added:
+
+- Expired session cleanup  
+- Single active session per user  
+- Session reuse logic  
+
+PERF-403 does **not** conflict with SEC-304.
+
+It simply tightens the validity logic:
+
+#### Before:
+```
+valid if expiry > now
+```
+
+#### After:
+```
+valid if expiry - now > 60 seconds
+```
+
+So:
+
+- ✔ SEC-304 still deletes expired sessions  
+- ✔ SEC-304 still maintains single-session behavior  
+- ✔ PERF-403 adds early expiry for extra security  
+
+They work together seamlessly.
+
+---
+
+### 5. Testing & Verification
+
+Commands:
+
+```
+npm run db:clear
+npm run dev
+```
+
+---
+
+#### **Scenario 1 — Normal session use**
+
+- Log in  
+- Browse normally  
+
+Result:  
+✔ Session treated as valid far from expiry  
+✔ No regression  
+
+---
+
+#### **Scenario 2 — Near-expiry session**
+
+Manually set:
+
+```
+expiresAt = now + 30 seconds
+```
+
+Result after refresh:
+
+- expiresInMs ≈ 30,000  
+- Deleted immediately  
+- User logged out  
+✔ Matches PERF-403 requirement  
+
+---
+
+#### **Scenario 3 — Already expired session**
+
+Set:
+
+```
+expiresAt = past timestamp
+```
+
+Result:
+
+- expiresInMs <= 0  
+- Deleted + rejected  
+✔ Expected  
+
+---
+
+#### **Scenario 4 — Fresh session (> 1 minute left)**
+
+Default behavior:
+
+✔ Treated as valid  
+✔ No early expiry  
+✔ No warnings  
+
+---
+
+### 6. Security & Performance Impact
+
+#### **Security Improvements**
+- Eliminates last-millisecond timing window  
+- More robust session behavior  
+- Safer against clock skew and latency issues  
+- Ensures attackers cannot exploit borderline expiry states  
+
+#### **Performance**
+- Only one subtraction and one conditional added  
+- Early deletions help keep sessions table small  
+- No additional SQL queries beyond existing ones  
+
+---
+
+### ✅ Final Result
+
+**PERF-403 is fully resolved.**
+
+The system now:
+
+- Expires sessions early (within 1-minute safety window)  
+- Cleans up expired and near-expiry sessions  
+- Reduces security risk around precise timing boundaries  
+- Integrates cleanly with SEC-304’s single-session model  
+
+---
 

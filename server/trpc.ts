@@ -54,6 +54,7 @@ export async function createContext(opts: CreateNextContextOptions | FetchCreate
 
       const session = await db.select().from(sessions).where(eq(sessions.token, token)).get();
 
+      /*
       if (session) {
         const now = new Date();
         const expiry = new Date(session.expiresAt);
@@ -69,6 +70,23 @@ export async function createContext(opts: CreateNextContextOptions | FetchCreate
           if (expiresIn < 60_000) {
             console.warn("Session about to expire");
           }
+        }
+      }
+      */
+     if (session) {
+        const now = new Date();
+        const expiry = new Date(session.expiresAt);
+        const expiresInMs = expiry.getTime() - now.getTime();
+
+        // SEC-304 + PERF-403 unified logic
+        // - Delete if session is expired (<= 0 ms)
+        // - Delete if session is within 1 minute of expiry (not allowed to use)
+        const EARLY_EXPIRY_WINDOW_MS = 60_000; // 1 minute
+
+        if (expiresInMs <= 0 || expiresInMs <= EARLY_EXPIRY_WINDOW_MS) {
+          await db.delete(sessions).where(eq(sessions.id, session.id!));
+        } else {
+          user = await db.select().from(users).where(eq(users.id, decoded.userId)).get();
         }
       }
     } catch (error) {
