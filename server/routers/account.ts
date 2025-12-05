@@ -95,6 +95,17 @@ export const accountRouter = router({
       // Fetch the created account
       const account = await db.select().from(accounts).where(eq(accounts.accountNumber, accountNumber!)).get();
 
+      // PERF-401: Fetch the created account and fail if it cannot be loaded.
+      // We never want to fabricate a "fake" account with a hard-coded balance.
+      if (!account) {
+        throw new TRPCError({
+          code: "INTERNAL_SERVER_ERROR",
+          message: "Failed to create account",
+        });
+      }
+
+      return account;
+      /*
       return (
         account || {
           id: 0,
@@ -105,7 +116,7 @@ export const accountRouter = router({
           status: "pending",
           createdAt: new Date().toISOString(),
         }
-      );
+      );*/
     }),
 
   getAccounts: protectedProcedure.query(async ({ ctx }) => {

@@ -17,6 +17,8 @@ export const users = sqliteTable("users", {
   createdAt: text("created_at").default(sql`CURRENT_TIMESTAMP`),
 });
 
+// TEMPORARY BREAK FOR PERF-401 TESTING
+//export const accounts = sqliteTable("accounts_broken_for_test", {
 export const accounts = sqliteTable("accounts", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   userId: integer("user_id")
