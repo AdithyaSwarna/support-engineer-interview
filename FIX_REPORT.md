@@ -23,7 +23,7 @@ Branch: fix/tickets
 | VAL-201  | Validation | High | Fixed  |
 | VAL-205  | Validation | High | Already Done --Check Comments  |
 | VAL-207  | Validation | High | Fixed  |
-
+| VAL-210  | Validation | High | Already Done --Check Comments  |
 
 ---
 
@@ -2002,4 +2002,87 @@ The backend now:
 This ensures **consistent, correct, and secure bank transfer handling** across the entire platform.
 
 ---
+
+## ✅ VAL-210 — Card Type Detection Validation Failure
+**Status:** Resolved (No New Code Change Needed)  
+
+---
+
+### 📝 Issue Summary
+
+Support reported that the system rejected many legitimate card numbers because validation only supported Visa and Mastercard.
+
+Impact:
+
+- Valid cards (Amex, Discover, JCB, Maestro, etc.) were incorrectly rejected  
+- Users could not fund accounts despite having valid cards  
+
+---
+
+### 1. Verification of Issue
+
+Original frontend logic:
+
+```ts
+value.startsWith("4") || value.startsWith("5")
+```
+
+Meaning:
+
+- ✔ Visa (4) allowed  
+- ✔ Mastercard (5) allowed  
+- ❌ All other cards rejected  
+
+Issue **confirmed**.
+
+---
+
+### 2. Root Cause
+
+- Validation attempted to detect card type using **prefix checks**  
+- Modern IIN/BIN ranges vary → prefix-only logic is **incomplete & outdated**  
+- Backend had **no validation**, so frontend was the *only* gate  
+- Result: **False rejections**, not true validation failures  
+
+---
+
+### 3. Why NO Code Change Is Required Now
+
+This issue is **already resolved through VAL-206**, because:
+
+#### ✔ The incorrect prefix-based validation was completely removed  
+We no longer guess card type using `startsWith()`.
+
+#### ✔ Validation replaced with industry-standard checks
+
+Current card validation performs:
+
+- Card number normalization  
+- Length validation (13–19 digits)  
+- **Luhn checksum** for mathematical validity  
+
+This works for:
+
+- Visa  
+- Mastercard  
+- Amex  
+- Discover  
+- JCB  
+- Maestro  
+- And all other major networks  
+
+#### ✔ Backend now mirrors the same strong validation  
+Ensures bypassing the UI is impossible.
+
+---
+
+### 4. Final Resolution
+
+VAL-210 was indirectly fixed by VAL-206 improvements:
+
+- Prefix-based card-type detection eliminated  
+- Luhn + length-based validation accepts all real card formats  
+- No additional code change needed  
+
+**VAL-210: Closed — Already resolved through updated card validation.**
 
