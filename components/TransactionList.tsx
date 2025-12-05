@@ -68,7 +68,11 @@ export function TransactionList({ accountId }: TransactionListProps) {
                 </span>
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                {transaction.description ? <span dangerouslySetInnerHTML={{ __html: transaction.description }} /> : "-"}
+                // SEC-303 (Author: Adithya Swarna)
+                // Removed dangerouslySetInnerHTML to prevent stored XSS.
+                // All transaction descriptions are now rendered as plain text.
+                // React’s default escaping safely handles any malicious input.
+                {transaction.description ? <span>{transaction.description}</span> : "-"} 
               </td>
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                 <span className={transaction.type === "deposit" ? "text-green-600" : "text-red-600"}>

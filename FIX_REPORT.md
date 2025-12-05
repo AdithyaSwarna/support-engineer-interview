@@ -11,6 +11,7 @@ Branch: fix/tickets
 | --------- | -------- | -------- | ------ |
 | SEC-301   | Security | Critical | Fixed  |
 | SEC-302   | Security | High     | Fixed  |
+| SEC-303   | Security | Critical | Fixed  |
 
 ---
 
@@ -227,3 +228,116 @@ Real banks often include:
 * ISO 13616/IBAN-style formats
 
 For this assignment, CSPRNG resolves the vulnerability fully.
+
+---
+
+# SEC-303 — XSS Vulnerability in Transaction Descriptions (Critical)
+
+##
+
+## Root Cause Analysis
+
+**File:** `components/TransactionList.tsx`
+
+The transaction description was rendered using `dangerouslySetInnerHTML`:
+
+```tsx
+<td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+  {transaction.description ? (
+    <span dangerouslySetInnerHTML={{ __html: transaction.description }} />
+  ) : (
+    "-"
+  )}
+</td>
+```
+
+This directly injects the string from `transaction.description` into the DOM as HTML, making the app vulnerable to stored XSS if any malicious content is stored in the transactions table.
+
+Even though the current backend only sets descriptions like *Funding from card* or *Funding from bank*, this pattern is unsafe because:
+
+* Future features might allow user-entered descriptions.
+* An attacker who can write to the DB (or exploit another bug) could persist `<script>` tags that execute for every user viewing the dashboard.
+
+### Root cause summary:
+
+* ❌ Use of `dangerouslySetInnerHTML` on untrusted data.
+* ❌ No sanitization or encoding of description before rendering.
+* ❌ Classic stored XSS pattern in a high-sensitivity context (banking UI).
+
+---
+
+## Solution (What I Changed)
+
+### 1. Remove `dangerouslySetInnerHTML` and render as plain text
+
+**Before:**
+
+```tsx
+{transaction.description ? (
+  <span dangerouslySetInnerHTML={{ __html: transaction.description }} />
+) : (
+  "-"
+)}
+```
+
+**After:**
+
+```tsx
+// SEC-303 (Author: Adithya Swarna)
+// Removed dangerouslySetInnerHTML to prevent stored XSS.
+// All transaction descriptions are now rendered as plain text.
+// React’s default escaping safely handles any malicious input.
+{transaction.description ? (
+  <span>{transaction.description}</span>
+) : (
+  "-"
+)}
+```
+
+This change:
+
+* Relies on React’s default escaping to prevent HTML from being interpreted as executable code.
+* Ensures any HTML-like string (including `<script>`) is displayed as text rather than executed.
+
+---
+
+## Verification Steps (After Fix)
+
+Kept the modified DB row where description was:
+
+```html
+<script>alert("XSS")</script>
+```
+
+Reloaded /dashboard in the browser.
+
+### Observed behavior (after fix):
+
+* No alert pop-up.
+* The description cell displays the literal text:
+
+```text
+<script>alert("XSS")</script>
+```
+
+Funded another account to verify normal behavior:
+
+* New transaction appears with description like *Funding from card*.
+* No console errors or rendering issues.
+
+### Result:
+
+* ✔ XSS payload is no longer executed.
+* ✔ Legitimate descriptions still render correctly.
+* ✔ No regressions in transaction history display.
+
+---
+
+## Preventive Measures
+
+* Avoid `dangerouslySetInnerHTML` unless absolutely necessary and content is strictly sanitized.
+* For future features that may allow custom descriptions:
+
+  * Validate and sanitize input on the backend.
+  * Consider enforcing a safe character set and maximum length.
+  * Keep descriptions as plain text in the UI by default; only render HTML when there is a strong business need and proper sanitization in place.
