@@ -15,6 +15,7 @@ Branch: fix/tickets
 | VAL-202   | Validation | Critical | Fixed  |
 | VAL-206   | Validation | Critical | Fixed  |
 | VAL-208   | Validation | Critical | Fixed  |
+| PERF-401   | Logic and Performance | Critical | Fixed  |
 
 ---
 
@@ -737,6 +738,166 @@ Backend and frontend both allow these.
 VAL-208 is fully resolved.  
 The system now uses a consistent, secure password policy enforced at both frontend and backend levels.  
 Documentation includes alternative approaches (Option B & C) for future improvement or compliance needs.
+
+---
+
+## ✅ PERF-401 — Account Creation Error
+
+---
+
+### 1. Issue Summary
+
+During account creation, if a database operation failed (insert or select), the system returned a fake fallback account object with:
+
+- `balance: 100`  
+- `status: "pending"`
+
+This produced incorrect balances and phantom accounts in the UI, misleading users into thinking the account was created successfully.
+
+---
+
+### 2. Root Cause Analysis
+
+Inside `createAccount` (`server/routers/account.ts`) the return logic was:
+
+```ts
+return (
+  account || {
+    id: 0,
+    userId: ctx.user.id,
+    accountNumber: accountNumber!,
+    accountType: input.accountType,
+    balance: 100,
+    status: "pending",
+    createdAt: new Date().toISOString(),
+  }
+);
+```
+
+❌ This caused two major failures:
+
+#### **A. Silent Failure Masking**
+If any DB failure occurred (e.g., SELECT returned undefined):
+
+- Instead of throwing an error  
+- The backend returned a fabricated object  
+
+#### **B. Incorrect Balance**
+The fallback hard-coded:
+
+- `balance: 100`
+
+Users saw **$100 in newly created accounts** even though the DB write failed.
+
+#### **C. UI Trust Issues**
+The UI displayed the fake account as if creation succeeded, causing:
+
+- Phantom accounts  
+- Incorrect balances  
+- Impossible-to-reconcile transaction flows  
+
+This is a **critical data integrity issue**.
+
+---
+
+### 3. Investigation Steps
+
+- Attempted account creation via UI → observed intermittent `$100` balances.  
+- Instrumented backend code; discovered fallback branch.  
+- Simulated DB failure by temporarily renaming the accounts table:
+
+```ts
+sqliteTable("accounts_broken_for_test")
+```
+
+With the table missing, DB operations failed — *but before the fix*, the backend still returned the fake `$100` account.
+
+After fixing the code, the same simulation:
+
+- ❌ Did **not** return a fabricated account  
+- ✔ Threw a proper backend error  
+- ✔ UI displayed failure state  
+
+This validated the root cause and confirmed the fix.
+
+---
+
+### 4. Fix Implemented
+
+🔧 **Removed fallback object completely**  
+🔧 **Backend now fails loudly instead of masking failures**
+
+New code:
+
+```ts
+// PERF-401: Fetch the created account and fail if it cannot be loaded.
+// We never fabricate an account object.
+const account = await db
+  .select()
+  .from(accounts)
+  .where(eq(accounts.accountNumber, accountNumber!))
+  .get();
+
+if (!account) {
+  throw new TRPCError({
+    code: "INTERNAL_SERVER_ERROR",
+    message: "Failed to create account",
+  });
+}
+
+return account;
+```
+
+✔ Guarantees:
+
+- No fake balances  
+- No fallback objects  
+- No silent failures  
+- Consistent error handling  
+- Correct data integrity  
+
+---
+
+### 5. How the Fix Was Tested (Verification)
+
+#### **A. Simulated DB failure (intentional test)**
+
+Temporarily renamed table to:
+
+`accounts_broken_for_test`
+
+Expected and observed:
+
+- ❌ Account creation failed  
+- ❌ No fallback `$100` balance  
+- ❌ No `"pending"` fake account  
+- ✔ UI displayed real error  
+- ✔ Backend threw proper exception  
+
+#### **B. Restored table name and re-tested**
+
+- ✔ Account creation succeeded normally  
+- ✔ Returned real DB-backed account  
+- ✔ Balance initialized correctly to `0`  
+- ✔ No incorrect `$100` defaults  
+
+This confirms correctness in both failure and success paths.
+
+---
+
+### 6. Prevention / Recommendations
+
+✔ **Never use fallback objects for DB operations**  
+Fallback objects hide real failures and corrupt financial data.
+
+✔ **Always throw errors when persistence fails**  
+Ensures transparency and prevents silently incorrect states.
+
+✔ **Log failures at the backend level**  
+Enables monitoring/alerting for production.
+
+✔ **Consider wrapping DB operations in a transaction**  
+Ensures strong consistency for multi-step workflows.
 
 ---
 
