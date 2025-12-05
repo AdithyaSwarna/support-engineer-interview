@@ -16,7 +16,8 @@ Branch: fix/tickets
 | VAL-206   | Validation | Critical | Fixed  |
 | VAL-208   | Validation | Critical | Fixed  |
 | PERF-401   | Logic and Performance | Critical | Fixed  |
-
+| PERF-405   | Logic and Performance | Critical | Fixed  |
+| PERF-407   | Logic and Performance | High | Fixed  |
 ---
 
 # SEC-301 — SSN Stored in Plaintext (Critical)
