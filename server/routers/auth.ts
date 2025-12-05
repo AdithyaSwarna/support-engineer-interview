@@ -8,6 +8,28 @@ import { users, sessions } from "@/lib/db/schema";
 import { eq, desc } from "drizzle-orm";
 
 
+// VAL-203 (Author: Adithya Swarna)
+// Restrict state to valid US 2-letter codes.
+// Includes 50 states + DC. (Territories can be added if needed.)
+const US_STATE_CODES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+  "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+  "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+  "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY",
+  "DC",
+];
+
+const stateSchema = z
+  .string()
+  .trim()
+  .length(2, "State must be a 2-letter code")
+  .transform((v) => v.toUpperCase())
+  .refine((value) => US_STATE_CODES.includes(value), {
+    message: "Invalid US state code",
+  });
+
+
 // VAL-208: Strong Password Schema (Option A - Industry Standard)
 // Requirements:
 //  - Minimum 8 characters
@@ -43,6 +65,21 @@ const emailSchema = z
     return !badTypos.some((suffix) => value.endsWith(suffix));
   }, 'Email domain looks incorrect (did you mean ".com"?)');
 
+
+// VAL-204 (Author: Adithya Swarna)
+// Phone number must be in international format (similar to E.164):
+//  - Starts with "+"
+//  - Next digit 1-9 (no leading 0 country code)
+//  - Total length: 10–15 digits (country code + subscriber number)
+// Examples: +14155552671, +447911123456
+const phoneNumberSchema = z
+  .string()
+  .trim()
+  .refine(
+    (value) => /^\+[1-9]\d{9,14}$/.test(value),
+    'Phone number must be in international format, e.g. "+14155552671".'
+  );
+
 export const authRouter = router({
   signup: publicProcedure
     .input(
@@ -57,7 +94,7 @@ export const authRouter = router({
         password: passwordSchema, //VAL-208 //z.string().min(8),
         firstName: z.string().min(1),
         lastName: z.string().min(1),
-        phoneNumber: z.string().regex(/^\+?\d{10,15}$/),
+        phoneNumber: phoneNumberSchema,
         // VAL-202 (Author: Adithya Swarna)
         // Added proper date validation for dateOfBirth.
         // - Coerces string input into a Date object
@@ -75,7 +112,7 @@ export const authRouter = router({
         ssn: z.string().regex(/^\d{9}$/),
         address: z.string().min(1),
         city: z.string().min(1),
-        state: z.string().length(2).toUpperCase(),
+        state: stateSchema,
         zipCode: z.string().regex(/^\d{5}$/),
       })
     )
@@ -229,7 +266,70 @@ export const authRouter = router({
 
       return { user: { ...user, password: undefined }, token };
     }),
+  
 
+    // PERF-402 (Author: Adithya Swarna)
+  // Make logout truthful: only report success if we actually removed a session.
+  logout: publicProcedure.mutation(async ({ ctx }) => {
+    let token: string | undefined;
+    let hadActiveSession = false;
+
+    // Normalize cookie reading logic (matches createContext)
+    if ("cookies" in ctx.req) {
+      // Pages router-style request (not used in App Router, but kept for completeness)
+      token = (ctx.req as any).cookies?.session;
+    } else {
+      const cookieHeader =
+        ctx.req.headers.get?.("cookie") || (ctx.req.headers as any).cookie || "";
+
+      const cookiesObj = Object.fromEntries(
+        cookieHeader
+          .split("; ")
+          .filter(Boolean)
+          .map((c: string) => {
+            const [key, ...val] = c.split("=");
+            return [key, val.join("=")];
+          })
+      );
+
+      token = cookiesObj.session;
+    }
+
+    if (token) {
+      // Check if there is an active session for this token
+      const existingSession = await db
+        .select()
+        .from(sessions)
+        .where(eq(sessions.token, token))
+        .get();
+
+      if (existingSession) {
+        hadActiveSession = true;
+        await db.delete(sessions).where(eq(sessions.token, token));
+      }
+    }
+
+    // Always clear the cookie on the client
+    if ("setHeader" in ctx.res) {
+      ctx.res.setHeader(
+        "Set-Cookie",
+        `session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`
+      );
+    } else {
+      (ctx.res as Headers).set(
+        "Set-Cookie",
+        `session=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`
+      );
+    }
+
+    return {
+      success: hadActiveSession,
+      message: hadActiveSession
+        ? "Logged out successfully"
+        : "No active session found to log out",
+    };
+  }),
+  /*
   logout: publicProcedure.mutation(async ({ ctx }) => {
     if (ctx.user) {
       // Delete session from database
@@ -256,4 +356,5 @@ export const authRouter = router({
 
     return { success: true, message: ctx.user ? "Logged out successfully" : "No active session" };
   }),
+  */
 });

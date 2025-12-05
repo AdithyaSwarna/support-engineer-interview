@@ -26,7 +26,12 @@ Branch: fix/tickets
 | VAL-210  | Validation | High | Already Done --Check Comments  |
 | SEC-304  | Security | High | Fixed  |
 | PERF-403   | Logic and Performance | High | Fixed  |
-
+| UI-101   | UI Issues | Medium | Fixed  |
+| VAL-203  | Validation | Medium | Fixed  |
+| VAL-204  | Validation | Medium | Fixed  |
+| VAL-209  | Validation | Medium | Fixed  |
+| PERF-402   | Logic and Performance | Medium | Fixed  |
+| PERF-404   | Logic and Performance | Medium | Already Done --Check Comments  |
 
 ---
 
@@ -2490,3 +2495,245 @@ The system now:
 
 ---
 
+# ✅ UI-101 — Dark Mode Text Visibility
+
+### 1. Issue Summary
+In dark mode, several modal components displayed white text on a white modal background, causing text to appear invisible.
+
+Affected areas:
+- Funding modal options  
+- Account creation modal text  
+- Left navigation (“SecureBank Dashboard”)  
+- Radio labels and form labels  
+
+### 2. Root Cause
+Tailwind’s global dark-mode styling applied:
+
+```css
+:root {
+  --foreground: #ededed; // light text
+}
+```
+
+Modals use white backgrounds, but text inherited the global light color → unreadable.
+
+### 3. Fix Implemented
+**A. Added explicit dark text to modal containers**
+
+`FundingModal.tsx`
+```html
+<div className="bg-white rounded-lg p-6 text-gray-900">
+```
+
+`AccountCreationModal.tsx`
+```html
+<div className="bg-white rounded-lg max-w-md w-full p-6 text-gray-900">
+```
+
+**B. Added text color for radio labels**
+```html
+<label className="flex items-center text-gray-900">
+```
+
+**C. Navigation title updated**
+```html
+<span className="font-bold text-xl text-gray-100">SecureBank Dashboard</span>
+```
+
+### 4. Result
+- All text now has correct contrast in dark mode  
+- No regressions in light mode  
+
+---
+
+# ✅ VAL-203 — State Code Validation
+
+### 1. Issue Summary
+System accepted invalid U.S. state codes such as `"XX"`.
+
+### 2. Root Cause
+Backend only validated length:
+
+```ts
+state: z.string().length(2).toUpperCase()
+```
+
+Frontend also only checked length.
+
+### 3. Fix Implemented
+
+**A. Added strict whitelist of U.S. states**
+```ts
+const US_STATE_CODES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+  "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+  "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+  "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"
+];
+```
+
+**B. Added frontend validation**
+```ts
+validate: (value) =>
+  US_STATE_CODES.includes(value.toUpperCase()) ||
+  "Invalid U.S. state code"
+```
+
+### 4. Result
+- Only real U.S. state codes accepted  
+- Backend receives normalized data  
+
+---
+
+# ✅ VAL-204 — Phone Number Format
+
+### 1. Issue Summary
+System accepted any numeric string; international numbers not validated consistently.
+
+### 2. Root Cause
+Backend allowed overly broad regex.  
+Frontend forced 10 digits with no "+".
+
+Mismatch created inconsistent validation.
+
+### 3. Fix Implemented
+
+**A. Added strict E.164-like backend schema**
+```ts
+const phoneNumberSchema = z.string().trim().refine(
+  (value) => /^\+[1-9]\d{9,14}$/.test(value),
+  'Phone number must be in international format, e.g. "+14155552671".'
+);
+```
+
+**B. Updated signup schema**
+```ts
+phoneNumber: phoneNumberSchema,
+```
+
+**C. Frontend validation**
+```ts
+const PHONE_REGEX = /^\+[1-9]\d{9,14}$/;
+
+validate: (value) =>
+  PHONE_REGEX.test(value.trim()) ||
+  'Use international format, e.g. "+14155552671".'
+```
+
+### 4. Result
+- Frontend & backend now aligned  
+- Only valid international-format numbers allowed  
+
+---
+
+# ✅ VAL-209 — Amount Input Issues
+
+### 1. Issue Summary
+Malformed amounts allowed:  
+`0005`, `05`, `000.50` → caused UI confusion.
+
+### 2. Root Cause
+Regex allowed leading zeros:
+
+```ts
+/^\d+\.?\d{0,2}$/
+```
+
+Backend normalized silently, UI showed malformed values.
+
+### 3. Fix Implemented
+
+**A. Updated regex**
+```ts
+pattern: {
+  value: /^(?!0\d)\d+(\.\d{1,2})?$/,
+  message: "Enter a valid amount (up to 2 decimals, no leading zeros).",
+}
+```
+
+**B. Added numeric validation**
+```ts
+validate: (value) => {
+  const amount = parseFloat(value);
+  if (Number.isNaN(amount)) return "Amount must be a number";
+  if (amount < 0.01) return "Amount must be at least $0.01";
+  if (amount > 10000) return "Amount cannot exceed $10,000";
+  return true;
+}
+```
+
+### 4. Result
+- Malformed amounts blocked  
+- Clear UI error messages  
+- Consistent transaction formatting  
+
+---
+
+# ✅ PERF-402 — Logout Issues
+
+### 1. Issue Summary
+Logout always returned `{ success: true }`, even when:
+
+- The session did not exist  
+- Cookie was stale  
+- Nothing was deleted  
+
+### 2. Root Cause
+Logout mutation blindly returned success.
+
+### 3. Fix Implemented
+
+**A. Added existence check**
+```ts
+const existingSession = await db
+  .select()
+  .from(sessions)
+  .where(eq(sessions.token, token))
+  .get();
+
+if (existingSession) {
+  hadActiveSession = true;
+  await db.delete(sessions).where(eq(sessions.token, token));
+}
+
+return {
+  success: hadActiveSession,
+  message: hadActiveSession
+    ? "Logged out successfully"
+    : "No active session found to log out",
+};
+```
+
+### 4. Result
+- Accurate logout responses  
+- Better security & user clarity  
+
+---
+
+## ✅ PERF-404 — Transaction Sorting  
+**Priority:** Medium  
+**Status:** Resolved (No new code needed)  
+**Author:** Adithya Swarna  
+
+### 1. Issue Summary
+Transactions appeared in random order.
+
+### 2. Root Cause
+SQLite does **not** guarantee ordering without `ORDER BY`.
+
+### 3. Fix Status — Already Implemented
+Sorting added previously during PERF-405 / PERF-407:
+
+```ts
+.orderBy(desc(transactions.createdAt), desc(transactions.id))
+```
+
+### 4. Why No New Code Was Needed
+Sorting was already deterministic and correct.
+
+### 5. Result
+- Transactions consistently show newest → oldest  
+- No randomness across refreshes  
+
+---

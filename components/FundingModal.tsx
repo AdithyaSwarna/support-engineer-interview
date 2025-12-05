@@ -91,7 +91,7 @@ export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProp
 
   return (
     <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg max-w-md w-full p-6">
+      <div className="bg-white rounded-lg max-w-md w-full p-6 text-gray-900">
         <h3 className="text-lg font-medium text-gray-900 mb-4">Fund Your Account</h3>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -104,17 +104,28 @@ export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProp
               <input
                 {...register("amount", {
                   required: "Amount is required",
+
+                  // VAL-209 (Author: Adithya Swarna)
+                  // Disallow multiple leading zeros.
+                  // Allows: "5", "5.25", "0.50"
+                  // Rejects: "0005", "05", "000.50"
                   pattern: {
-                    value: /^\d+\.?\d{0,2}$/,
-                    message: "Invalid amount format",
+                    value: /^(?!0\d)\d+(\.\d{1,2})?$/,
+                    message: "Enter a valid amount (up to 2 decimals, no leading zeros).",
                   },
-                  min: {
-                    value: 0.0,
-                    message: "Amount must be at least $0.01",
-                  },
-                  max: {
-                    value: 10000,
-                    message: "Amount cannot exceed $10,000",
+
+                  validate: (value) => {
+                    const amount = parseFloat(value);
+                    if (Number.isNaN(amount)) {
+                      return "Amount must be a number";
+                    }
+                    if (amount < 0.01) {
+                      return "Amount must be at least $0.01";
+                    }
+                    if (amount > 10000) {
+                      return "Amount cannot exceed $10,000";
+                    }
+                    return true;
                   },
                 })}
                 type="text"

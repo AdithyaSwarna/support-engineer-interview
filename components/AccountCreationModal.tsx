@@ -28,7 +28,7 @@ export function AccountCreationModal({ onClose, onSuccess }: AccountCreationModa
 
   return (
     <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center p-4">
-      <div className="bg-white rounded-lg max-w-md w-full p-6">
+      <div className="bg-white rounded-lg max-w-md w-full p-6 text-gray-900">
         <h3 className="text-lg font-medium text-gray-900 mb-4">Open New Account</h3>
 
         <form onSubmit={handleSubmit} className="space-y-4">

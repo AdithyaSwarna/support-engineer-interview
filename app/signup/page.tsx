@@ -6,6 +6,20 @@ import { useForm } from "react-hook-form";
 import { trpc } from "@/lib/trpc/client";
 import Link from "next/link";
 
+
+// VAL-203 (Author: Adithya Swarna)
+// Frontend mirror of backend US state validation.
+const US_STATE_CODES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+  "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+  "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+  "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY",
+  "DC",
+];
+
+const PHONE_REGEX = /^\+[1-9]\d{9,14}$/;
+
 type SignupFormData = {
   email: string;
   password: string;
@@ -253,13 +267,12 @@ export default function SignupPage() {
                 <input
                   {...register("phoneNumber", {
                     required: "Phone number is required",
-                    pattern: {
-                      value: /^\d{10}$/,
-                      message: "Phone number must be 10 digits",
-                    },
+                    validate: (value) =>
+                      PHONE_REGEX.test(value.trim()) ||
+                      'Use international format, e.g. "+14155552671".',
                   })}
                   type="tel"
-                  placeholder="1234567890"
+                  placeholder="+14155552671"
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
                 />
                 {errors.phoneNumber && <p className="mt-1 text-sm text-red-600">{errors.phoneNumber.message}</p>}
@@ -333,14 +346,17 @@ export default function SignupPage() {
                   <input
                     {...register("state", {
                       required: "State is required",
-                      pattern: {
-                        value: /^[A-Z]{2}$/,
-                        message: "Use 2-letter state code",
+                      validate: (value) => {
+                        const normalized = value.trim().toUpperCase();
+                        return (
+                          US_STATE_CODES.includes(normalized) ||
+                          "Enter a valid US state (e.g., CA, NY)"
+                        );
                       },
                     })}
                     type="text"
                     placeholder="CA"
-                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border uppercase"
                   />
                   {errors.state && <p className="mt-1 text-sm text-red-600">{errors.state.message}</p>}
                 </div>

@@ -24,3 +24,30 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* === UI-101: Dark Mode Text Visibility (Author: Adithya Swarna) === */
+/* Ensure form fields are readable in both light and dark mode */
+
+input,
+textarea,
+select {
+  background-color: #ffffff;
+  color: #111827;        /* dark text in light mode */
+  border-color: #d1d5db; /* gray-300-ish */
+}
+
+/* Dark mode overrides for form fields */
+@media (prefers-color-scheme: dark) {
+  input,
+  textarea,
+  select {
+    background-color: #1f2937; /* dark gray background */
+    color: #f9fafb;            /* near-white text */
+    border-color: #4b5563;     /* gray-600 */
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: #9ca3af; /* gray-400 - visible but subtle */
+  }
+}
