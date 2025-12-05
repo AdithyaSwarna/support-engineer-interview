@@ -25,6 +25,9 @@ export default function SignupPage() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [error, setError] = useState("");
+  // VAL-202 (Author: Adithya Swarna)
+  // Frontend guardrail: prevent selecting a future date of birth.
+  const todayStr = new Date().toISOString().split("T")[0];
 
   const {
     register,
@@ -191,6 +194,7 @@ export default function SignupPage() {
                 <input
                   {...register("dateOfBirth", { required: "Date of birth is required" })}
                   type="date"
+                  max={todayStr} // VAL-202: disallow future dates in UI
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
                 />
                 {errors.dateOfBirth && <p className="mt-1 text-sm text-red-600">{errors.dateOfBirth.message}</p>}

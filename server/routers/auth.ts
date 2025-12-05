@@ -16,7 +16,20 @@ export const authRouter = router({
         firstName: z.string().min(1),
         lastName: z.string().min(1),
         phoneNumber: z.string().regex(/^\+?\d{10,15}$/),
-        dateOfBirth: z.string(),
+        // VAL-202 (Author: Adithya Swarna)
+        // Added proper date validation for dateOfBirth.
+        // - Coerces string input into a Date object
+        // - Rejects invalid dates
+        // - Rejects dates in the future
+        // Ticket requirement: No age restriction, only ensure DOB is not a future date.
+        dateOfBirth: z.coerce.date().refine(
+          (date) => {
+            const today = new Date();
+            today.setHours(23, 59, 59, 999);
+            return date <= today;
+          },
+          "Date of birth cannot be in the future."
+        ),
         ssn: z.string().regex(/^\d{9}$/),
         address: z.string().min(1),
         city: z.string().min(1),
@@ -38,8 +51,17 @@ export const authRouter = router({
       // SEC-301 (Author: Adithya Swarna)
       // Hash SSN before storing — suggestion: use consistent rounds (e.g., 10 or 12) for all sensitive fields.
       const hashedSsn = await bcrypt.hash(input.ssn, 12);
+
+      // VAL-202 (Author: Adithya Swarna)
+      // dateOfBirth is now a Date (from z.coerce.date), but SQLite expects strings.
+      // Normalize to ISO date string (YYYY-MM-DD) before inserting.
+      const { dateOfBirth, ...restInput } = input;
+      const normalizedDob = dateOfBirth.toISOString().split("T")[0];
+
+
       await db.insert(users).values({
         ...input,
+        dateOfBirth: normalizedDob,
         password: hashedPassword,
         ssn: hashedSsn, // SEC-301: store hashed SSN instead of plaintext
       });
