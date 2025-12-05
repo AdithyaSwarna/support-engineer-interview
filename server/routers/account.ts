@@ -126,18 +126,45 @@ export const accountRouter = router({
     return userAccounts;
   }),
 
-  fundAccount: protectedProcedure
-    .input(
-      z.object({
-        accountId: z.number(),
-        amount: z.number().positive(),
-        fundingSource: z.object({
-          type: z.enum(["card", "bank"]),
-          accountNumber: z.string(),
-          routingNumber: z.string().optional(),
-        }),
+
+    fundAccount: protectedProcedure
+      .input(
+        z.object({
+          accountId: z.number(),
+          amount: z.number().positive(),
+          // VAL-207 (Author: Adithya Swarna)
+          // Backend validation for routing number:
+          //  - For type === "bank": routingNumber is REQUIRED and must be 9 digits
+          //  - For type === "card": routingNumber is ignored/optional
+          fundingSource: z
+            .object({
+              type: z.enum(["card", "bank"]),
+              accountNumber: z.string(),
+              routingNumber: z.string().optional(),
+            })
+            .superRefine((fs, ctx) => {
+              if (fs.type === "bank") {
+                if (!fs.routingNumber || fs.routingNumber.trim() === "") {
+                  ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ["routingNumber"],
+                    message: "Routing number is required for bank funding",
+                  });
+                  return;
+                }
+
+                if (!/^\d{9}$/.test(fs.routingNumber)) {
+                  ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: ["routingNumber"],
+                    message: "Routing number must be exactly 9 digits",
+                  });
+                }
+              }
+          }),
       })
     )
+
     .mutation(async ({ input, ctx }) => {
       const amount = parseFloat(input.amount.toString());
 
