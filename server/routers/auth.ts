@@ -7,12 +7,36 @@ import { db } from "@/lib/db";
 import { users, sessions } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
+
+// VAL-208: Strong Password Schema (Option A - Industry Standard)
+// Requirements:
+//  - Minimum 8 characters
+//  - At least one lowercase letter
+//  - At least one uppercase letter
+//  - At least one number
+//  - At least one special character
+//
+// Notes:
+//  Option B (NIST SP 800-63B) would recommend focusing on length (12–64 chars)
+//  and checking against a banned password list instead of forced complexity.
+//  Option C (Enterprise Strict Policy) may add: no repeated characters,
+//  no sequential patterns, no dictionary words, etc.
+//
+const passwordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters long")
+  .regex(
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/,
+    "Password must include uppercase & lowercase letters, a number, and a special character"
+  );
+
+
 export const authRouter = router({
   signup: publicProcedure
     .input(
       z.object({
         email: z.string().email().toLowerCase(),
-        password: z.string().min(8),
+        password: passwordSchema, //VAL-208 //z.string().min(8),
         firstName: z.string().min(1),
         lastName: z.string().min(1),
         phoneNumber: z.string().regex(/^\+?\d{10,15}$/),

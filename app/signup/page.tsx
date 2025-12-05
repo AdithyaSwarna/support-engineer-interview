@@ -95,30 +95,73 @@ export default function SignupPage() {
                 />
                 {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>}
               </div>
-
+              
               <div>
                 <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                   Password
                 </label>
+
                 <input
                   {...register("password", {
                     required: "Password is required",
+
+                    // Minimum length requirement (still part of Option A)
                     minLength: {
                       value: 8,
                       message: "Password must be at least 8 characters",
                     },
+
+                    // VAL-208: Strong password validation (Option A - Industry Standard)
+                    // Requirements:
+                    //  - At least one lowercase character
+                    //  - At least one uppercase character
+                    //  - At least one number
+                    //  - At least one special character
+                    //  - Not a very common password (e.g., password, 12345678)
+                    //
+                    // Notes:
+                    //  Option B (NIST): Would focus on length ≥ 12 and breached-password lists.
+                    //  Option C (Enterprise Strict): Would add no sequences, no repeats, etc.
                     validate: {
                       notCommon: (value) => {
                         const commonPasswords = ["password", "12345678", "qwerty"];
-                        return !commonPasswords.includes(value.toLowerCase()) || "Password is too common";
+                        return (
+                          !commonPasswords.includes(value.toLowerCase()) ||
+                          "Password is too common"
+                        );
                       },
-                      hasNumber: (value) => /\d/.test(value) || "Password must contain a number",
+
+                      hasLowercase: (value) =>
+                        /[a-z]/.test(value) ||
+                        "Password must contain at least one lowercase letter",
+
+                      hasUppercase: (value) =>
+                        /[A-Z]/.test(value) ||
+                        "Password must contain at least one uppercase letter",
+
+                      hasNumber: (value) =>
+                        /\d/.test(value) ||
+                        "Password must contain at least one number",
+
+                      hasSpecial: (value) =>
+                        /[^A-Za-z0-9]/.test(value) ||
+                        "Password must contain at least one special character",
                     },
                   })}
                   type="password"
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
                 />
-                {errors.password && <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>}
+                
+                
+
+                {errors.password && (
+                  <p className="mt-1 text-sm text-red-600">{errors.password.message}</p>
+                )}
+
+                {/* Optional hint for better UX */}
+                <p className="mt-1 text-xs text-gray-500">
+                  Use at least 8 characters with upper & lowercase letters, a number, and a special character.
+                </p>
               </div>
 
               <div>

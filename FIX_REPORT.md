@@ -14,6 +14,7 @@ Branch: fix/tickets
 | SEC-303   | Security   | Critical | Fixed  |
 | VAL-202   | Validation | Critical | Fixed  |
 | VAL-206   | Validation | Critical | Fixed  |
+| VAL-208   | Validation | Critical | Fixed  |
 
 ---
 
@@ -623,3 +624,119 @@ Backend validation ensures:
 VAL-206 is fully resolved.
 
 ---
+
+## VAL-208 — Weak Password Requirements 
+
+---
+
+### 1. Issue Summary
+The system previously enforced only **minimum length** as password validation on the backend:
+
+```ts
+password: z.string().min(8)
+```
+
+The frontend added a weak check for a number, but both layers allowed trivial passwords such as:
+
+- `abcdefgh1`
+- `Password`
+- `12345678`
+
+This posed a security risk, as users could bypass frontend validation and submit weak passwords directly to the API.
+
+---
+
+### 2. Root Cause
+
+#### Backend:
+- No validation beyond `.min(8)`.
+- Allowed weak or common passwords.
+
+#### Frontend:
+- Only checked:
+  - minimum 8 characters
+  - contains a number
+- Did *not* enforce uppercase, lowercase, or special characters.
+
+Mismatch between backend and frontend allowed inconsistent or insecure credentials.
+
+---
+
+### 3. Fix Implemented (Option A — Industry Standard)
+
+A new **strong password schema** was added to the backend:
+
+```ts
+// VAL-208: Strong Password Schema (Option A - Industry Standard)
+const passwordSchema = z
+  .string()
+  .min(8, "Password must be at least 8 characters long")
+  .regex(
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).+$/,
+    "Password must include uppercase & lowercase letters, a number, and a special character"
+  );
+```
+
+Signup now uses:
+
+```ts
+password: passwordSchema
+```
+
+Frontend was updated to validate:
+
+- lowercase
+- uppercase
+- number
+- special character
+- not in banned list
+
+---
+
+### 4. Alternative Security Approaches (Not Implemented)
+
+#### **Option B — NIST SP 800-63B (Modern Recommended Approach)**
+- Focus on **length ≥ 12** rather than required character types.
+- Validate against known compromised password lists.
+- Avoid arbitrary composition rules.
+
+#### **Option C — Enterprise Strict Policy**
+- Everything in Option A **plus**:
+  - No sequential characters (e.g., `abcd`, `1234`)
+  - No repeated characters (`aaaaaa`)
+  - No dictionary words
+  - Rotational policies (not recommended by NIST)
+
+These were documented but intentionally not implemented to keep user experience reasonable for the project.
+
+---
+
+### 5. Validation
+
+#### Failing Cases
+| Password | Reason |
+|----------|--------|
+| `abcdefgh` | no number, no uppercase, no special |
+| `Abcdefgh` | no number, no special |
+| `Abcdefg1` | no special |
+| `password1!` | banned word |
+
+All fail correctly in UI and backend.
+
+#### Passing Cases
+- `Password1!`
+- `Str0ng$Pass`
+- `MySecureP@ss123`
+
+Backend and frontend both allow these.
+
+---
+
+### 6. Final Result
+
+VAL-208 is fully resolved.  
+The system now uses a consistent, secure password policy enforced at both frontend and backend levels.  
+Documentation includes alternative approaches (Option B & C) for future improvement or compliance needs.
+
+---
+
