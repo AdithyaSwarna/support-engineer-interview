@@ -3,7 +3,8 @@ import { TRPCError } from "@trpc/server";
 import { protectedProcedure, router } from "../trpc";
 import { db } from "@/lib/db";
 import { accounts, transactions } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+// import { eq, and } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm"; // PERF-405 + 407
 import crypto from "crypto"; // SEC-302: secure RNG
 
 function generateAccountNumber(): string {
@@ -230,21 +231,14 @@ export const accountRouter = router({
         });
       }
 
+      // PERF-405: ensure deterministic ordering of transactions
+      // PERF-407: avoid N+1 queries by not re-fetching account for each transaction.
       const accountTransactions = await db
         .select()
         .from(transactions)
-        .where(eq(transactions.accountId, input.accountId));
+        .where(eq(transactions.accountId, input.accountId))
+        .orderBy(desc(transactions.createdAt)); // newest first
 
-      const enrichedTransactions = [];
-      for (const transaction of accountTransactions) {
-        const accountDetails = await db.select().from(accounts).where(eq(accounts.id, transaction.accountId)).get();
-
-        enrichedTransactions.push({
-          ...transaction,
-          accountType: accountDetails?.accountType,
-        });
-      }
-
-      return enrichedTransactions;
+      return accountTransactions;
     }),
 });

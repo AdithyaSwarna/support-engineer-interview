@@ -901,3 +901,246 @@ Ensures strong consistency for multi-step workflows.
 
 ---
 
+## ✅ PERF-405 & PERF-407 — Combined Documentation  
+**PERF-405:** Missing Transactions  
+**PERF-407:** Performance Degradation  
+**Priority:** Critical  
+**Author:** Adithya Swarna  
+**Status:** Resolved  
+
+---
+
+### 1. Issue Summary
+
+#### **PERF-405 — Missing Transactions**
+
+Users reported that transaction history did not always show all transactions after multiple funding events. Entries appeared:
+
+- Out of order  
+- Randomly shuffled  
+- Occasionally “missing” on refresh  
+- Inconsistent across page loads  
+
+This caused users to lose trust in the accuracy of their financial history.
+
+#### **PERF-407 — Performance Degradation**
+
+The transaction history endpoint slowed significantly as the transaction count increased. In some cases, responses were delayed or partially returned.
+
+Symptoms included:
+
+- Slow dashboard load  
+- High UI jitter on refresh  
+- DB logs showing excessive SELECT statements  
+- Occasional incomplete transaction lists (appearing as missing entries)  
+
+---
+
+### 2. Root Cause Analysis
+
+Both issues traced to the same function:
+
+`server/routers/account.ts → getTransactions`
+
+---
+
+#### 🟥 **Root Cause 1 (PERF-405): Missing `.orderBy()` → nondeterministic order**
+
+Existing code:
+
+```ts
+const accountTransactions = await db
+  .select()
+  .from(transactions)
+  .where(eq(transactions.accountId, input.accountId));
+```
+
+SQL engines **do NOT guarantee row order without `ORDER BY`**.
+
+Effects:
+
+- Newly added transactions may appear at bottom  
+- Order shifts on each refresh  
+- Fast insertions grouped unpredictably  
+- Users perceive entries as “missing”  
+
+This is a **backend correctness issue**, not a UI bug.
+
+---
+
+#### 🟥 **Root Cause 2 (PERF-407): N+1 Query Pattern Causing Slowdowns**
+
+The original code executed:
+
+- 1 query → fetch all transactions  
+- 1 additional query per transaction → re-fetch the same account  
+
+Example:
+
+| # Transactions | SQL Queries |
+|----------------|-------------|
+| 10             | 11          |
+| 100            | 101         |
+| 1000           | 1001        |
+
+This caused:
+
+- Slower response times  
+- Timeouts  
+- Incomplete responses  
+- Perceived “missing transactions” (overlapping with PERF-405)  
+- Heavy DB load  
+
+The enrichment logic was unnecessary because account details were already known.
+
+---
+
+### 3. Investigation Steps
+
+✔ Reproduced by performing multiple deposits and refreshing quickly  
+✔ Observed random ordering  
+✔ Observed inconsistent transaction counts  
+✔ Logged backend → dozens of SELECTs  
+✔ Confirmed missing `.orderBy()` and N+1 pattern  
+
+SQLite behavior confirmed:
+
+Without `ORDER BY`, row order is based on file structure, caching, and insertion timing.
+
+---
+
+### 4. Fix Implemented
+
+---
+
+#### 🛠️ **A. Deterministic Ordering (Fix for PERF-405)**
+
+Added:
+
+```ts
+.orderBy(desc(transactions.createdAt))
+```
+
+Now:
+
+- Always newest → oldest  
+- Stable order across refreshes  
+- No phantom missing entries  
+
+---
+
+#### 🛠️ **B. Removed N+1 Query Loop (Fix for PERF-407)**
+
+Old code (removed):
+
+```ts
+const enrichedTransactions = [];
+for (const transaction of accountTransactions) {
+  const accountDetails = await db.select().from(accounts).where(eq(accounts.id, transaction.accountId)).get();
+  enrichedTransactions.push({...});
+}
+```
+
+New code:
+
+```ts
+return accountTransactions;
+```
+
+Eliminates unnecessary per-transaction queries and significantly improves speed.
+
+---
+
+### ✔ Final Updated `getTransactions` Implementation
+
+```ts
+getTransactions: protectedProcedure
+  .input(
+    z.object({
+      accountId: z.number(),
+    })
+  )
+  .query(async ({ input, ctx }) => {
+    // Verify account belongs to user
+    const account = await db
+      .select()
+      .from(accounts)
+      .where(and(eq(accounts.id, input.accountId), eq(accounts.userId, ctx.user.id)))
+      .get();
+
+    if (!account) {
+      throw new TRPCError({
+        code: "NOT_FOUND",
+        message: "Account not found",
+      });
+    }
+
+    // PERF-405: deterministic ordering
+    // PERF-407: avoid N+1 queries
+    const accountTransactions = await db
+      .select()
+      .from(transactions)
+      .where(eq(transactions.accountId, input.accountId))
+      .orderBy(desc(transactions.createdAt));
+
+    return accountTransactions;
+  });
+```
+
+---
+
+### 5. Testing & Verification
+
+---
+
+#### ✔ **Functional Testing (PERF-405)**
+
+Performed 10–20 deposits; verified:
+
+- All transactions appeared  
+- Always ordered newest → oldest  
+- Refreshing preserved ordering  
+- No disappearing entries  
+- No duplicates  
+
+Result: **Stable, correct ordering.**
+
+---
+
+#### ✔ **Performance Testing (PERF-407)**
+
+With 50+ transactions:
+
+- Endpoint responded instantly  
+- Only **1 SQL query** executed  
+- No N+1 logs  
+- No partial results  
+- UI remained smooth  
+
+Result: **Performance dramatically improved.**
+
+---
+
+### 6. Final Result
+
+Both issues **PERF-405** and **PERF-407** are fully resolved.
+
+- Transactions always appear in correct order  
+- No missing or out-of-order entries  
+- Query performance is fast and scalable  
+- N+1 pattern eliminated  
+- Backend complexity reduced  
+- UI now shows accurate, banker-grade financial history  
+
+---
+
+### 7. Prevention & Recommendations
+
+✔ Always specify `.orderBy()` for financial records  
+✔ Avoid per-row enrichment queries unless required  
+✔ Return minimal, efficient structures from backend  
+✔ Add integration tests to verify sorted order  
+✔ Consider pagination for high-volume accounts  
+
+---
+

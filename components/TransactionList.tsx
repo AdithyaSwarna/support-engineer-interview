@@ -50,9 +50,9 @@ export function TransactionList({ accountId }: TransactionListProps) {
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Description
+              Amount
             </th>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
           </tr>
         </thead>
@@ -67,18 +67,23 @@ export function TransactionList({ accountId }: TransactionListProps) {
                   {transaction.type}
                 </span>
               </td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                // SEC-303 (Author: Adithya Swarna)
-                // Removed dangerouslySetInnerHTML to prevent stored XSS.
-                // All transaction descriptions are now rendered as plain text.
-                // React’s default escaping safely handles any malicious input.
-                {transaction.description ? <span>{transaction.description}</span> : "-"} 
-              </td>
+              {/* Amount column */}
               <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                <span className={transaction.type === "deposit" ? "text-green-600" : "text-red-600"}>
-                  {transaction.type === "deposit" ? "+" : "-"}
-                  {formatCurrency(transaction.amount)}
-                </span>
+                {transaction.type === "deposit" ? (
+                  <span className="text-green-600">+{formatCurrency(transaction.amount)}</span>
+                ) : (
+                  <span className="text-red-600">-{formatCurrency(transaction.amount)}</span>
+                )}
+              </td>
+
+              {/* Description column – safe plain text (SEC-303) */}
+              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                {/* SEC-303 (Author: Adithya Swarna)
+                    Removed dangerouslySetInnerHTML to prevent stored XSS.
+                    All transaction descriptions are now rendered as plain text.
+                    React’s default escaping safely handles any malicious input.
+                */}
+                {transaction.description || "No description available"}
               </td>
               <td className="px-6 py-4 whitespace-nowrap">
                 <span
