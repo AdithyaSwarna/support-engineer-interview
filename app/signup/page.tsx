@@ -29,6 +29,14 @@ export default function SignupPage() {
   // Frontend guardrail: prevent selecting a future date of birth.
   const todayStr = new Date().toISOString().split("T")[0];
 
+  // VAL-201 (Author: Adithya Swarna)
+  // Allowed top-level domains for client-side email validation.
+  // This keeps the validation readable and avoids hard-coding typo endings like ".con" or ".moc".
+  const allowedTlds = [
+    "com", "org", "net", "edu", "gov", "io", "ai", "co", "us", "in",
+    "info", "biz", "online", "tech"
+  ];
+
   const {
     register,
     handleSubmit,
@@ -78,22 +86,49 @@ export default function SignupPage() {
         <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
           {step === 1 && (
             <div className="space-y-4">
+              
               <div>
                 <label htmlFor="email" className="block text-sm font-medium text-gray-700">
                   Email
                 </label>
                 <input
+                  // VAL-201 (Author: Adithya Swarna)
+                  // Frontend email validation:
+                  //  - Requires basic name@domain.tld format
+                  //  - Validates TLD against a small allow-list (com, org, net, io, in, etc.)
+                  //  - Matches backend behavior where email is normalized to lowercase
                   {...register("email", {
                     required: "Email is required",
                     pattern: {
-                      value: /^\S+@\S+$/i,
-                      message: "Invalid email address",
+                      // Ensures "name@domain.tld" with at least one dot in the domain.
+                      value: /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/i,
+                      message: "Enter a valid email address (e.g., name@example.com)",
+                    },
+                    validate: {
+                      validTld: (value) => {
+                        const lower = value.toLowerCase().trim();
+                        const parts = lower.split(".");
+                        const tld = parts[parts.length - 1];
+
+                        if (!tld || !allowedTlds.includes(tld)) {
+                          return `The domain ".${tld}" is not recognized. Did you mean ".com"?`;
+                        }
+
+                        return true;
+                      },
                     },
                   })}
                   type="email"
                   className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
                 />
-                {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>}
+                {errors.email && (
+                  <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
+                )}
+
+                {/* Optional UX note to explain lowercase normalization on backend */}
+                <p className="mt-1 text-xs text-gray-500">
+                  We&apos;ll store your email in lowercase (e.g., name@example.com) for consistency.
+                </p>
               </div>
               
               <div>

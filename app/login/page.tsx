@@ -15,6 +15,14 @@ export default function LoginPage() {
   const router = useRouter();
   const [error, setError] = useState("");
 
+  // VAL-201 (Author: Adithya Swarna)
+  // Allowed top-level domains for client-side email validation on login.
+  // Keeps behavior consistent with signup and avoids hard-coding typo endings.
+  const allowedTlds = [
+    "com", "org", "net", "edu", "gov", "io", "ai", "co", "us", "in",
+    "info", "biz", "online", "tech"
+  ];
+
   const {
     register,
     handleSubmit,
@@ -41,23 +49,51 @@ export default function LoginPage() {
 
         <form className="mt-8 space-y-6" onSubmit={handleSubmit(onSubmit)}>
           <div className="space-y-4">
-            <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
-                Email
-              </label>
-              <input
-                {...register("email", {
-                  required: "Email is required",
-                  pattern: {
-                    value: /^\S+@\S+$/i,
-                    message: "Invalid email address",
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+              Email
+            </label>
+
+            <input
+              {...register("email", {
+                required: "Email is required",
+
+                // VAL-201 (Author: Adithya Swarna)
+                // Stronger client-side email format validation:
+                //  - Basic name@domain.tld pattern
+                //  - TLD must be in an allow-list (com, org, net, io, in, etc.)
+                pattern: {
+                  value: /^[^\s@]+@[^\s@]+\.[A-Za-z]{2,}$/i,
+                  message: "Enter a valid email address (e.g., name@example.com)",
+                },
+                validate: {
+                  validTld: (value) => {
+                    const lower = value.toLowerCase().trim();
+                    const parts = lower.split(".");
+                    const tld = parts[parts.length - 1];
+
+                    if (!tld || !allowedTlds.includes(tld)) {
+                      return `The domain ".${tld}" is not recognized. Please check your email.`;
+                    }
+
+                    return true;
                   },
-                })}
-                type="email"
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
-              />
-              {errors.email && <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>}
-            </div>
+                },
+              })}
+              type="email"
+              className="mt-1 block w-full rounded-md border-gray-300 shadow-sm 
+                        focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
+            />
+
+            {errors.email && (
+              <p className="mt-1 text-sm text-red-600">{errors.email.message}</p>
+            )}
+
+            {/* Helpful note: login normalizes email on the backend */}
+            <p className="mt-1 text-xs text-gray-500">
+              Your email is treated case-insensitively (TEST@example.com = test@example.com).
+            </p>
+          </div>
 
             <div>
               <label htmlFor="password" className="block text-sm font-medium text-gray-700">

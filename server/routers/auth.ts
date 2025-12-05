@@ -35,7 +35,22 @@ export const authRouter = router({
   signup: publicProcedure
     .input(
       z.object({
-        email: z.string().email().toLowerCase(),
+
+        // VAL-201 (Author: Adithya Swarna)
+        // Normalize email to lowercase for storage and catch common ".com" typos.
+        email: z
+          .string()
+          .email()
+          .transform((value) => value.toLowerCase())
+          .refine(
+            (value) => !/\.(con|cmo|ocm)$/.test(value),
+            {
+              message: 'Email domain looks invalid (did you mean ".com"?)',
+            }
+          ),
+
+        //email: z.string().email().toLowerCase(),
+
         password: passwordSchema, //VAL-208 //z.string().min(8),
         firstName: z.string().min(1),
         lastName: z.string().min(1),
@@ -129,7 +144,15 @@ export const authRouter = router({
   login: publicProcedure
     .input(
       z.object({
-        email: z.string().email(),
+
+        // VAL-201: login uses the same normalization as signup so email is case-insensitive
+        email: z
+          .string()
+          .email()
+          .transform((value) => value.toLowerCase()),
+
+        //email: z.string().email(),
+        
         password: z.string(),
       })
     )

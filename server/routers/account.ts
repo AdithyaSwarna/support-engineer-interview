@@ -191,6 +191,39 @@ export const accountRouter = router({
       // Fetch the created transaction
       const transaction = await db.select().from(transactions).orderBy(transactions.createdAt).limit(1).get();
 
+
+            // Update account balance in the database based on the existing balance
+      await db
+        .update(accounts)
+        .set({
+          balance: account.balance + amount,
+        })
+        .where(eq(accounts.id, input.accountId));
+
+      // PERF-406 (Author: Adithya Swarna)
+      // Balance Calculation:
+      // Previously, the code tried to "rebuild" the balance using a loop that added
+      // amount/100 a hundred times. That introduced floating-point drift and could
+      // return a value that didn't exactly match the true account balance.
+      //
+      // To ensure we always return the *real* authoritative balance, we:
+      // 1. Update the balance in the DB.
+      // 2. Re-read the updated account row from the DB.
+      // 3. Return that value as newBalance.
+      //
+      // This keeps UI and database fully consistent and avoids cumulative precision errors.
+      const updatedAccount = await db
+        .select()
+        .from(accounts)
+        .where(eq(accounts.id, input.accountId))
+        .get();
+
+      return {
+        transaction,
+        newBalance: updatedAccount?.balance ?? account.balance + amount,
+      };
+
+      /*
       // Update account balance
       await db
         .update(accounts)
@@ -208,6 +241,7 @@ export const accountRouter = router({
         transaction,
         newBalance: finalBalance, // This will be slightly off due to float precision
       };
+      */
     }),
 
   getTransactions: protectedProcedure
