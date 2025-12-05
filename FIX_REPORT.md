@@ -7,11 +7,13 @@ Branch: fix/tickets
 
 ## Ticket Summary
 
-| Ticket ID | Area     | Priority | Status |
-| --------- | -------- | -------- | ------ |
-| SEC-301   | Security | Critical | Fixed  |
-| SEC-302   | Security | High     | Fixed  |
-| SEC-303   | Security | Critical | Fixed  |
+| Ticket ID | Area       | Priority | Status |
+| --------- | ---------- | -------- | ------ |
+| SEC-301   | Security   | Critical | Fixed  |
+| SEC-302   | Security   | High     | Fixed  |
+| SEC-303   | Security   | Critical | Fixed  |
+| VAL-202   | Validation | Critical | Fixed  |
+| VAL-206   | Validation | Critical | Fixed  |
 
 ---
 
@@ -341,3 +343,137 @@ Funded another account to verify normal behavior:
   * Validate and sanitize input on the backend.
   * Consider enforcing a safe character set and maximum length.
   * Keep descriptions as plain text in the UI by default; only render HTML when there is a strong business need and proper sanitization in place.
+
+---
+
+# VAL-202 — Date of Birth Validation Allows Future Dates
+
+## Issue Summary
+
+* The system accepted future dates as valid Date of Birth.
+* This violates expected user-data rules and could cause compliance issues.
+* Backend stored `dateOfBirth` as a JavaScript `Date` object, which SQLite cannot bind, causing:
+
+  * “SQLite3 can only bind numbers, strings, bigints, buffers, and null”
+
+## Root Cause Analysis
+
+### 1. Missing validation in backend
+
+`dateOfBirth` was defined as:
+
+```ts
+dateOfBirth: z.string(),
+```
+
+Meaning:
+
+* No check for future dates
+* No coercion into a proper `Date` object
+
+### 2. SQLite cannot store a JS Date object
+
+After switching to `z.coerce.date()`, the value became a JS Date.
+
+The insert still used:
+
+```ts
+...input
+```
+
+So SQLite received a raw Date object → invalid binding.
+
+---
+
+## Investigation Steps
+
+* Reproduced issue by selecting a DOB in the future → signup succeeded.
+* Reviewed the Zod schema → incorrect date validation.
+* Observed SQLite error when inserting Date type.
+* Confirmed DB schema expects a text value (`YYYY-MM-DD`).
+
+---
+
+## Fix Implemented
+
+### ✔ 1. Added correct Zod validation
+
+```ts
+dateOfBirth: z.coerce.date().refine(
+  (date) => {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    return date <= today;
+  },
+  "Date of birth cannot be in the future."
+)
+```
+
+### ✔ 2. Normalized DOB for SQLite
+
+```ts
+const { dateOfBirth, ...restInput } = input;
+const normalizedDob = dateOfBirth.toISOString().split("T")[0];
+```
+
+### ✔ 3. Updated DB insert
+
+```ts
+await db.insert(users).values({
+  ...restInput,
+  dateOfBirth: normalizedDob,
+  password: hashedPassword,
+  ssn: hashedSsn,
+});
+```
+
+### ✔ 4. Added UI constraint
+
+```html
+max={new Date().toISOString().split("T")[0]}
+```
+
+---
+
+## Verification Steps (After Fix)
+
+### **Test 1 — Valid past DOB**
+
+**Input:** `1995-05-10`
+
+**Result:**
+
+* Signup successful
+* DOB stored as `1995-05-10`
+
+### **Test 2 — Future DOB**
+
+**Input:** `2030-01-01`
+
+**Result:**
+
+* UI disallows selection
+* Backend rejects manual request:
+
+  * "Date of birth cannot be in the future."
+
+### **Test 3 — Database Check**
+
+Checked SQLite using GUI + script:
+
+```bash
+npm run db:list-users
+```
+
+**Result:**
+
+* DOB stored in valid string format (`YYYY-MM-DD`).
+
+---
+
+## Final Outcome
+
+* Future DOBs blocked
+* SQLite binding error resolved
+* Backend and UI validations aligned
+* No regressions in signup flow

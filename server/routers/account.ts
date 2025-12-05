@@ -4,12 +4,53 @@ import { protectedProcedure, router } from "../trpc";
 import { db } from "@/lib/db";
 import { accounts, transactions } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import crypto from "crypto"; // SEC-302: secure RNG
 
 function generateAccountNumber(): string {
-  return Math.floor(Math.random() * 1000000000)
-    .toString()
-    .padStart(10, "0");
+  // SEC-302 (Author: Adithya Swarna)
+  // Use cryptographically secure random numbers for account numbers.
+  const random = crypto.randomInt(0, 10 ** 10); // Range: 0 to 9,999,999,999
+  return random.toString().padStart(10, "0");
 }
+
+// --- VAL-206: Card validation helpers ---
+// Normalizes card numbers by stripping spaces and hyphens so both
+// "4111 1111 1111 1111" and "4111111111111111" are treated the same.
+function normalizeCardNumber(cardNumber: string): string {
+  return cardNumber.replace(/[\s-]/g, "");
+}
+
+// Basic card validity check using length + Luhn algorithm.
+// This does not guarantee the card is real, but filters out obviously invalid inputs.
+function isValidCardNumber(cardNumber: string): boolean {
+  const normalized = normalizeCardNumber(cardNumber);
+
+  // Typical card length range: 13–19 digits
+  if (!/^\d{13,19}$/.test(normalized)) {
+    return false;
+  }
+
+  // Luhn checksum
+  let sum = 0;
+  let shouldDouble = false;
+
+  for (let i = normalized.length - 1; i >= 0; i--) {
+    let digit = parseInt(normalized[i], 10);
+
+    if (shouldDouble) {
+      digit *= 2;
+      if (digit > 9) {
+        digit -= 9;
+      }
+    }
+
+    sum += digit;
+    shouldDouble = !shouldDouble;
+  }
+
+  return sum % 10 === 0;
+}
+// --- end VAL-206 helpers ---
 
 export const accountRouter = router({
   createAccount: protectedProcedure
@@ -108,6 +149,22 @@ export const accountRouter = router({
           message: "Account is not active",
         });
       }
+      
+      
+      // --- VAL-206: server-side card number validation ---
+      if (input.fundingSource.type === "card") {
+        const normalizedCard = normalizeCardNumber(input.fundingSource.accountNumber);
+
+        // Server-side guard: prevent obviously invalid card numbers
+        // even if the client-side validation is bypassed.
+        if (!isValidCardNumber(normalizedCard)) {
+          throw new TRPCError({
+            code: "BAD_REQUEST",
+            message: "Invalid card number",
+          });
+        }
+      }
+      // --- end VAL-206 validation ---
 
       // Create transaction
       await db.insert(transactions).values({

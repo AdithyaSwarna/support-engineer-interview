@@ -4,6 +4,40 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { trpc } from "@/lib/trpc/client";
 
+
+// --- VAL-206: card validation helpers (mirrors backend logic) ---
+function normalizeCardNumber(cardNumber: string): string {
+  return cardNumber.replace(/[\s-]/g, "");
+}
+
+function isValidCardNumber(cardNumber: string): boolean {
+  const normalized = normalizeCardNumber(cardNumber);
+
+  if (!/^\d{13,19}$/.test(normalized)) {
+    return false;
+  }
+
+  let sum = 0;
+  let shouldDouble = false;
+
+  for (let i = normalized.length - 1; i >= 0; i--) {
+    let digit = parseInt(normalized[i], 10);
+
+    if (shouldDouble) {
+      digit *= 2;
+      if (digit > 9) {
+        digit -= 9;
+      }
+    }
+
+    sum += digit;
+    shouldDouble = !shouldDouble;
+  }
+
+  return sum % 10 === 0;
+}
+// --- end VAL-206 helpers ---
+
 interface FundingModalProps {
   accountId: number;
   onClose: () => void;
@@ -110,6 +144,23 @@ export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProp
               {fundingType === "card" ? "Card Number" : "Account Number"}
             </label>
             <input
+                //VAL-206 Helper
+                {...register("accountNumber", {
+                  required: `${fundingType === "card" ? "Card" : "Account"} number is required`,
+                  validate: {
+                  validCardOrAccount: (value) => {
+                    if (fundingType === "card") {
+                      // Mirror backend Luhn-based validation so users get immediate feedback.
+                      return isValidCardNumber(value) || "Invalid card number";
+                    }
+
+                    // Bank account path: keep simple numeric check.
+                    return /^\d+$/.test(value) || "Invalid account number";
+                  },
+                },
+              })}
+              // End of VAL-206 Helper
+              /*
               {...register("accountNumber", {
                 required: `${fundingType === "card" ? "Card" : "Account"} number is required`,
                 pattern: {
@@ -123,6 +174,7 @@ export function FundingModal({ accountId, onClose, onSuccess }: FundingModalProp
                   },
                 },
               })}
+              */
               type="text"
               className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm p-2 border"
               placeholder={fundingType === "card" ? "1234567812345678" : "123456789"}
