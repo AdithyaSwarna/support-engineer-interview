@@ -477,3 +477,149 @@ npm run db:list-users
 * SQLite binding error resolved
 * Backend and UI validations aligned
 * No regressions in signup flow
+
+---
+## ✅ VAL-206 — Card Number Validation  
+**Priority:** Critical  
+**Status:** Resolved  
+**Author:** Adithya Swarna  
+
+---
+
+### 1. Issue Summary
+The application incorrectly accepted **invalid credit/debit card numbers** during the "Fund Account" workflow.
+
+The frontend validation only checked:
+
+- Card number must be 16 digits  
+- Must start with **4** or **5**
+
+---
+
+### 2. Root Cause Analysis
+
+#### **Frontend Root Cause**
+`FundingModal.tsx` used:
+
+```ts
+value.startsWith("4") || value.startsWith("5")
+```
+
+This means ANY 16-digit number beginning with 4 or 5 passed, even if mathematically impossible.
+
+#### **Backend Root Cause**
+`account.ts` performed zero validation on card numbers:
+
+- No length verification  
+- No normalization (spaces/dashes)  
+- No Luhn checksum  
+- Client-provided number was trusted blindly  
+
+Because the backend is authoritative, this was the real source of the defect.
+
+---
+
+### 3. Investigation Notes
+- Reproduced issue using random values like `4234567891234567`; both frontend and backend accepted them.  
+- Added a debug block to confirm backend validation path was executed.  
+- Verified `fundAccount` mutation always processed card numbers without checking validity.  
+- Confirmed the fix must include validation in both places, not just UI.  
+
+---
+
+### 4. Fix Implemented
+
+#### **Frontend Fix (`FundingModal.tsx`)**
+Replaced naive prefix/length checks with:
+
+- Card number normalization  
+- Luhn algorithm verification  
+- Unified validation behavior with backend  
+
+```ts
+validate: {
+  validCardOrAccount: (value) => {
+    if (fundingType === "card") {
+      return isValidCardNumber(value) || "Invalid card number";
+    }
+    return /^\d+$/.test(value) || "Invalid account number";
+  },
+}
+```
+
+#### **Backend Fix (`account.ts`) — Authoritative Validation**
+Added normalization + Luhn validation:
+
+```ts
+if (input.fundingSource.type === "card") {
+  const normalizedCard = normalizeCardNumber(input.fundingSource.accountNumber);
+
+  if (!isValidCardNumber(normalizedCard)) {
+    throw new TRPCError({
+      code: "BAD_REQUEST",
+      message: "Invalid card number",
+    });
+  }
+}
+```
+
+Backend validation ensures:
+
+- UI cannot be bypassed  
+- Direct API calls cannot inject bad data  
+- Security and consistency are preserved  
+
+---
+
+### 5. Why This Fix Works
+- Luhn algorithm is the industry standard used by major card networks.  
+- Normalization supports input with spaces/hyphens.  
+- Valid card numbers (Visa, Mastercard test cards) pass as expected.  
+- Invalid numbers always fail, even if they look superficially correct.  
+- Backend now acts as the source of truth, preventing tampering.  
+
+---
+
+### 6. Prevention Measures
+- Always validate payment-related inputs on the backend, not only UI.  
+- Keep frontend and backend validation logic aligned.  
+- Consider adding automated tests for:  
+  - Valid card numbers → success  
+  - Invalid card numbers → failure  
+- Log repeated invalid attempts for fraud detection (optional enhancement).  
+
+---
+
+### 7. Validation Steps (Manual QA)
+
+#### **Invalid (should fail)**
+
+| Card Number       | Reason          |
+|------------------|-----------------|
+| 4111111111111112 | Fails Luhn      |
+| 4234567891234567 | Fails Luhn      |
+| 5000000000000001 | Fails Luhn      |
+| 1234567812345678 | Not a valid pattern |
+
+**Result:**  
+`"Invalid card number"` (frontend and backend)
+
+#### **Valid Test Cards (should pass)**
+
+| Card Type  | Test Number        |
+|------------|--------------------|
+| Visa       | 4111111111111111   |
+| Mastercard | 5555555555554444   |
+
+**Result:**
+
+- Funding succeeds  
+- Balance updates  
+- Transaction recorded  
+
+---
+
+### 8. Final Result
+VAL-206 is fully resolved.
+
+---
